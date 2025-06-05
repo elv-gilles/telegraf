@@ -75,8 +75,9 @@ type Object struct {
 	Renames             map[string]string `toml:"renames"`
 	Fields              map[string]string `toml:"fields"`
 	Tags                []string          `toml:"tags"`
-	IncludeMatchingKeys []string          `toml:"include_matching_keys"` // only include keys selected by this regex
-	ExcludeMatchingKeys []string          `toml:"exclude_matching_keys"` // exclude keys matching this regex
+	CombineArrays       bool              `toml:"combine_arrays"`        // combine arrays into the object metric
+	IncludeMatchingKeys []string          `toml:"include_matching_keys"` // only include keys selected by these regex (include all if no regex is provided)
+	ExcludeMatchingKeys []string          `toml:"exclude_matching_keys"` // exclude keys matching these regex (include_matching_keys are applied first)
 	JQ                  []string          `toml:"jq"`                    // jq expression to apply to the result of 'path'
 	JqNoMerge           bool              `toml:"jq_no_merge"`           // by default (when false), multiple values are merged - if possible - into one
 	IncludedKeys        []string          `toml:"included_keys"`
@@ -356,7 +357,7 @@ func (p *Parser) expandArray(result metricNode, timestamp time.Time) ([]telegraf
 				make(map[string]interface{}),
 				timestamp,
 			)
-			if val.IsObject() {
+			if val.IsObject() || (val.IsArray() && p.objectConfig.CombineArrays) {
 				n := result
 				n.Metric = m
 				n.Result = val
@@ -560,6 +561,7 @@ func jqTransform(
 }
 
 // removeFields filters out fields matching the given matching keys from the given metrics.
+// If no matching keys are provided, the metrics are returned unchanged.
 // Matching keys are first compiled into regex and passed to the remFn parameter.
 // A metric that remains with no field after filtering is removed from the return slice.
 func removeFields(
@@ -691,7 +693,7 @@ func (p *Parser) processObjects(input []byte, objects []Object, timestamp time.T
 }
 
 // combineObject will add all fields/tags to a single metric
-// If the object has multiple array's as elements it won't comine those, they will remain separate metrics
+// If the object has multiple array's as elements it won't combine those, they will remain separate metrics
 func (p *Parser) combineObject(result metricNode, timestamp time.Time) ([]telegraf.Metric, error) {
 	var results []telegraf.Metric
 	if result.IsArray() || result.IsObject() {
@@ -745,7 +747,7 @@ func (p *Parser) combineObject(result metricNode, timestamp time.Time) ([]telegr
 
 			arrayNode.Tag = tag
 
-			if val.IsObject() {
+			if val.IsObject() || (val.IsArray() && p.objectConfig.CombineArrays) {
 				results, err = p.combineObject(arrayNode, timestamp)
 				if err != nil {
 					p.Log.Error(err)
